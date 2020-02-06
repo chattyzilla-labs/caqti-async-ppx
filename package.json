@@ -1,0 +1,35 @@
+{
+  "name": "caqti-async-ppx",
+  "esy": {
+    "build": [
+      [
+        "dune",
+        "build",
+        "-p",
+        "ppx_rapper",
+        "-j",
+        "1",
+        "@install"
+      ]
+    ],
+    "buildsInSource": "_build",
+    "buildEnv": {
+      "ODOC_SYNTAX": "re"
+    }
+  },
+  "dependencies": {
+    "@esy-ocaml/reason": ">= 3.4.0 < 3.6.0",
+    "@opam/pg_query": "*",
+    "@opam/ppxlib": "*",
+    "@opam/base": "*",
+    "@opam/caqti": "*",
+    "@opam/caqti-async": "*",
+    "ocaml": "~4.8.0",
+    "refmterr": "*"
+  },
+  "devDependencies": {
+    "@opam/merlin": "*",
+    "ocaml": "~4.8.0",
+    "@opam/odoc": "*"
+  }
+}
