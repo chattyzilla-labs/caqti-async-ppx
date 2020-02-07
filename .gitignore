@@ -7,3 +7,4 @@ _release
 *.byte
 *.native
 *.install
+node_modules
