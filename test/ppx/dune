@@ -4,11 +4,21 @@
 (libraries ppx_rapper ppxlib))
 
 (rule
+(targets test1.ml)
+(deps (:input test.re))
+(action (with-stdout-to %{targets} (run refmt --assume-explicit-arity --parse re --print ml %{input} ))))
+
+(rule
 (targets test.actual.ml)
-(deps (:pp pp.exe) (:input test.ml))
-(action (run ./%{pp} --impl %{input} -o %{targets})))
+(deps (:pp pp.exe) (file test1.ml))
+(action (run ./%{pp} test1.ml  -o %{targets})))
+
+(rule
+(targets test.actual.re)
+(deps (file test.actual.ml))
+(action (with-stdout-to %{targets} (run refmt --assume-explicit-arity --parse ml --print re test.actual.ml))))
 
 (rule
 (alias runtest)
-(deps (file test.expected.ml) (file test.actual.ml))
-(action (diff test.expected.ml test.actual.ml)))
+(deps (file test.actual.re))
+(action (diff test.expected.re test.actual.re)))

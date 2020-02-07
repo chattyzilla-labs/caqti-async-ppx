@@ -15,7 +15,7 @@ let parse_args = args => {
     let record_in = List.mem(args, "record_in", ~equal=String.equal);
     let record_out = List.mem(args, "record_out", ~equal=String.equal);
     let syntax_off = List.mem(args, "syntax_off", ~equal=String.equal);
-    [@implicit_arity] Ok(record_in, record_out, syntax_off);
+    Ok((record_in, record_out, syntax_off));
   };
 };
 
@@ -109,7 +109,7 @@ let make_expand_get_and_exec_expression =
           let patch = Stdlib.String.concat(", ", subsqls);
           let sql = [%e sql_before] ++ patch ++ [%e sql_after];
           open Ppx_rapper_runtime;
-          let [@implicit_arity]
+          let
               Dynparam.Pack(
                 packed_list_type,
                 [%p Codegen.ppat_of_param(~loc, list_param)],
@@ -279,7 +279,7 @@ let expand = (~loc, ~path as _, action, query, args) => {
   let expression_result =
     switch (parse_args(args)) {
     | Error(err) => Error(err)
-    | [@implicit_arity] Ok(record_in, record_out, syntax_off) =>
+    |  Ok((record_in, record_out, syntax_off)) =>
       switch (Query.parse(query)) {
       | Error(error) => Error(Query.explain_error(error))
       | Ok(parsed_query) =>

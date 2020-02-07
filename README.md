@@ -40,7 +40,7 @@ let my_query =
       \      WHERE username <> ? AND id > ?\n\
       \      "
   in
-  let wrapped (module Db : Caqti_lwt.CONNECTION) ~wrong_user ~min_id =
+  let wrapped (module Db : Caqti_async.CONNECTION) ~wrong_user ~min_id =
     let f result =
       let g (id, (username, (following, bio))) =
         (id, username, following, bio)
@@ -168,6 +168,3 @@ then the input and/or output of the query will be records. For the example above
 
 By default, queries are syntax checked using [pg_query-ocaml](https://github.com/roddyyaga/pg_query-ocaml) and the
 extension will error if syntax checking fails. If this gives a false positive error for a query it can be suppressed using the `syntax_off` option.
-
-## Contributions
-Contributions are very welcome!
