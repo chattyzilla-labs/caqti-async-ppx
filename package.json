@@ -29,7 +29,7 @@
     }
   },
   "dependencies": {
-    "@esy-ocaml/reason": ">= 3.4.0 < 3.6.0",
+    "@esy-ocaml/reason": ">= 3.4.0",
     "@opam/pg_query": "*",
     "@opam/ppxlib": "*",
     "@opam/base": "*",
@@ -41,6 +41,7 @@
   "devDependencies": {
     "@opam/merlin": "*",
     "ocaml": "~4.8.0",
-    "@opam/odoc": "*"
+    "@opam/odoc": "*",
+    "@opam/ocaml-lsp-server": "ocaml/ocaml-lsp:ocaml-lsp-server.opam"
   }
 }
