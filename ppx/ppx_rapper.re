@@ -5,7 +5,13 @@ module Buildef = Ast_builder.Default;
 /** Handle 'record_in' etc. in [%rapper "SELECT * FROM USERS" record_in record_out] */
 
 let parse_args = args => {
-  let allowed_args = ["record_in", "record_out", "syntax_off"];
+  let allowed_args = [
+    "record_in",
+    "record_out",
+    "function_out",
+    "syntax_off",
+  ];
+
   switch (
     List.find(~f=a => !List.mem(~equal=String.equal, allowed_args, a), args)
   ) {
@@ -14,8 +20,24 @@ let parse_args = args => {
   | None =>
     let record_in = List.mem(args, "record_in", ~equal=String.equal);
     let record_out = List.mem(args, "record_out", ~equal=String.equal);
+    let function_out = List.mem(args, "function_out", ~equal=String.equal);
+    let input_kind =
+      if (record_in) {
+        `Record;
+      } else {
+        `Labelled_args;
+      };
+    let output_kind =
+      switch (record_out, function_out) {
+      | (false, false) => `Tuple
+      | (true, false) => `Record
+      | (false, true) => `Function
+      | (true, true) => assert(false)
+      };
+
     let syntax_off = List.mem(args, "syntax_off", ~equal=String.equal);
-    Ok((record_in, record_out, syntax_off));
+    assert(!(function_out && record_out));
+    Ok((input_kind, output_kind, syntax_off));
   };
 };
 
@@ -36,7 +58,7 @@ let component_expressions = (~loc, parsed_query) => {
 /** Make a function [expand_get] to produce the expressions for [get_one], [get_opt] and [get_many], and a similar [expand_exec] for [execute] */
 
 let make_expand_get_and_exec_expression =
-    (~loc, parsed_query, record_in, record_out) => {
+    (~loc, parsed_query, input_kind, output_kind) => {
   let {Query.sql, in_params, out_params, list_params} = parsed_query;
   switch (list_params) {
   | Some({subsql, string_index, param_index, params}) =>
@@ -44,6 +66,7 @@ let make_expand_get_and_exec_expression =
     let subsql_expr = Buildef.estring(~loc, subsql);
     let sql_before =
       Buildef.estring(~loc) @@ String.sub(sql, ~pos=0, ~len=string_index);
+
     let sql_after =
       Buildef.estring(~loc) @@
       String.sub(
@@ -56,45 +79,77 @@ let make_expand_get_and_exec_expression =
     let expression_contents = {
       Codegen.in_params: params_before @ params @ params_after,
       out_params,
-      record_in,
-      record_out,
+      input_kind,
+      output_kind,
     };
 
-    let caqti_input_type =
+    let caqti_input_type = {
+      let exprs_before =
+        List.map(~f=Codegen.caqti_type_of_param(~loc), params_before);
+
+      let exprs_after =
+        List.map(~f=Codegen.caqti_type_of_param(~loc), params_after);
+
       switch (List.is_empty(params_before), List.is_empty(params_after)) {
       | (true, true) =>
         %expr
         packed_list_type
       | (true, false) =>
-        let params_before = Codegen.make_caqti_type_tup(~loc, params_before);
+        let expression =
+          Codegen.caqti_type_tup_of_expressions(
+            ~loc,
+            [[%expr packed_list_type], ...exprs_after],
+          );
+
         %expr
-        Caqti_type.(tup2([%e params_before], packed_list_type));
+        {
+          open Caqti_type;
+          %e
+          expression;
+        };
       | (false, true) =>
-        let params_before = Codegen.make_caqti_type_tup(~loc, params_before);
+        let expression =
+          Codegen.caqti_type_tup_of_expressions(
+            ~loc,
+            exprs_before @ [[%expr packed_list_type]],
+          );
+
         %expr
-        Caqti_type.(tup2([%e params_before], packed_list_type));
+        {
+          open Caqti_type;
+          %e
+          expression;
+        };
       | (false, false) =>
-        let params_before = Codegen.make_caqti_type_tup(~loc, params_before);
-        let params_after = Codegen.make_caqti_type_tup(~loc, params_after);
+        let expression =
+          Codegen.caqti_type_tup_of_expressions(
+            ~loc,
+            exprs_before @ [[%expr packed_list_type]] @ exprs_after,
+          );
+
         %expr
-        Caqti_type.(
-          tup3([%e params_before], packed_list_type, [%e params_after])
-        );
+        {
+          open Caqti_type;
+          %e
+          expression;
+        };
       };
+    };
 
     let outputs_caqti_type = Codegen.make_caqti_type_tup(~loc, out_params);
     let list_param = List.hd_exn(params);
     let make_generic = (make_function, query_expr) => {
-      let body_fn = body =>
-        switch%expr (
-          [%e
-            Buildef.pexp_ident(
-              ~loc,
-              Codegen.lident_of_param(~loc, list_param),
-            )
-          ]
-        ) {
-        | [] =>
+      let body_fn = body => {
+        let base =
+          switch%expr (
+            [%e
+              Buildef.pexp_ident(
+                ~loc,
+                Codegen.lident_of_param(~loc, list_param),
+              )
+            ]
+          ) {
+          | [] =>
           Async_kernel.Deferred.Result.fail(
             Caqti_error.(
               encode_rejected(
@@ -104,45 +159,70 @@ let make_expand_get_and_exec_expression =
               )
             ),
           )
-        | elems =>
-          let subsqls = Stdlib.List.map(_ => [%e subsql_expr], elems);
-          let patch = Stdlib.String.concat(", ", subsqls);
-          let sql = [%e sql_before] ++ patch ++ [%e sql_after];
-          open Ppx_rapper_runtime;
-          let
-              Dynparam.Pack(
-                packed_list_type,
-                [%p Codegen.ppat_of_param(~loc, list_param)],
-              ) =
-            Stdlib.List.fold_left(
-              (pack, item) =>
-                Dynparam.add(
-                  {
-                    open Caqti_type;
-                    %e
-                    Codegen.make_caqti_type_tup(~loc, [list_param]);
-                  },
-                  item,
-                  pack,
-                ),
-              Dynparam.empty,
-              elems,
-            );
+          | elems =>
+            let subsqls =
+              Stdlib.List.map(
+                _ =>
+                  [%e
+                  subsql_expr],
+                elems,
+              );
 
-          let query = [%e query_expr];
-          %e
-          body;
+            let patch = Stdlib.String.concat(", ", subsqls);
+            let sql = [%e sql_before] ++ patch ++ [%e sql_after];
+            open Rapper.Internal;
+            let
+                Dynparam.Pack(
+                  packed_list_type,
+                  [%p Codegen.ppat_of_param(~loc, list_param)],
+                ) =
+              Stdlib.List.fold_left(
+                (pack, item) =>
+                  Dynparam.add(
+                    [@ocaml.warning "-33"]
+                    {
+                      open Caqti_type;
+                      %e
+                      Codegen.make_caqti_type_tup(~loc, [list_param]);
+                    },
+                    item,
+                    pack,
+                  ),
+                Dynparam.empty,
+                elems,
+              );
+
+            let query = [%e query_expr];
+            %e
+            body;
+          };
+
+        switch (output_kind) {
+        | `Function =>
+          %expr
+          (loaders => [%e base])
+        | _ => base
         };
+      };
 
-      let%expr wrapped = (module Db: Caqti_async.CONNECTION) => [%e
-        make_function(~body_fn, ~loc, expression_contents)
-      ];
+      switch (output_kind) {
+      | `Function =>
+        let%expr wrapped = [%e
+          make_function(~body_fn, ~loc, expression_contents)
+        ];
 
-      wrapped;
+        wrapped(loaders);
+      | _ =>
+        let%expr wrapped = [%e
+          make_function(~body_fn, ~loc, expression_contents)
+        ];
+
+        wrapped;
+      };
     };
 
     let expand_get = (caqti_request_function_expr, make_function) =>
-      try (
+      try(
         Ok(
           make_generic(
             make_function,
@@ -170,7 +250,7 @@ let make_expand_get_and_exec_expression =
       };
 
     let expand_exec = (caqti_request_function_expr, make_function) =>
-      try (
+      try(
         Ok(
           make_generic(
             make_function,
@@ -191,7 +271,6 @@ let make_expand_get_and_exec_expression =
       };
 
     (expand_get, expand_exec);
-
   | None =>
     let (inputs_caqti_type, outputs_caqti_type, parsed_sql) =
       component_expressions(~loc, parsed_query);
@@ -200,21 +279,35 @@ let make_expand_get_and_exec_expression =
       Codegen.{
         in_params: parsed_query.in_params,
         out_params: parsed_query.out_params,
-        record_in,
-        record_out,
+        input_kind,
+        output_kind,
       };
 
-    let make_generic = (make_function, query_expr) => {
-      let%expr query = [%e query_expr];
-      let wrapped = (module Db: Caqti_async.CONNECTION) => [%e
-        make_function(~body_fn=x => x, ~loc, expression_contents)
-      ];
+    let make_generic = (make_function, query_expr) =>
+      switch (output_kind) {
+      | `Function =>
+        %expr
+        (
+          loaders => {
+            let query = [%e query_expr];
+            let wrapped = [%e
+              make_function(~body_fn=x => x, ~loc, expression_contents)
+            ];
 
-      wrapped;
-    };
+            wrapped(loaders);
+          }
+        )
+      | _ =>
+        let%expr query = [%e query_expr];
+        let wrapped = [%e
+          make_function(~body_fn=x => x, ~loc, expression_contents)
+        ];
+
+        wrapped;
+      };
 
     let expand_get = (caqti_request_function_expr, make_function) =>
-      try (
+      try(
         Ok(
           make_generic(
             make_function,
@@ -246,7 +339,7 @@ let make_expand_get_and_exec_expression =
       };
 
     let expand_exec = (caqti_request_function_expr, make_function) =>
-      try (
+      try(
         Ok(
           make_generic(
             make_function,
@@ -279,7 +372,7 @@ let expand = (~loc, ~path as _, action, query, args) => {
   let expression_result =
     switch (parse_args(args)) {
     | Error(err) => Error(err)
-    |  Ok((record_in, record_out, syntax_off)) =>
+    | Ok((input_kind, output_kind, syntax_off)) =>
       switch (Query.parse(query)) {
       | Error(error) => Error(Query.explain_error(error))
       | Ok(parsed_query) =>
@@ -291,6 +384,7 @@ let expand = (~loc, ~path as _, action, query, args) => {
               | Some({subsql, string_index, _}) =>
                 let sql = parsed_query.sql;
                 let sql_before = String.sub(sql, ~pos=0, ~len=string_index);
+
                 let sql_after =
                   String.sub(
                     sql,
@@ -319,17 +413,20 @@ let expand = (~loc, ~path as _, action, query, args) => {
                 make_expand_get_and_exec_expression(
                   ~loc,
                   parsed_query,
-                  record_in,
-                  record_out,
+                  input_kind,
+                  output_kind,
                 );
 
               switch (action) {
               /* execute is special case because there is no output Caqti_type */
               | "execute" =>
-                if (record_out) {
-                  Error("record_out is not a valid argument for execute");
-                } else {
-                  expand_exec([%expr exec], Codegen.exec_function);
+                switch (output_kind) {
+                | `Record =>
+                  Error("record_out is not a valid argument for execute")
+                /* TODO - could implement this */
+                | `Function =>
+                  Error("function_out is not a valid argument for execute")
+                | `Tuple => expand_exec([%expr exec], Codegen.exec_function)
                 }
               | "get_one" => expand_get([%expr find], Codegen.find_function)
               | "get_opt" =>

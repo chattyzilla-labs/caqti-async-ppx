@@ -1,5 +1,4 @@
 /* Simple queries */
-
 type a = {username: string};
 
 type b = {
@@ -49,7 +48,7 @@ let collect_list = [%rapper
 ];
 
 /* Using custom types */
-module Suit: Ppx_rapper_runtime.CUSTOM = {
+module Suit: Rapper.CUSTOM = {
   type t =
     | Clubs
     | Diamonds
@@ -85,7 +84,7 @@ let get_cards = [%rapper
 /* Example showing the correspondence between rapper/Caqti types and OCaml types */
 type all_types_output = {
   id: string,
-  payload: Suit.t,
+  payload: string,
   version: int,
   some_int32: int32,
   some_int64: int64,
@@ -98,10 +97,55 @@ type all_types_output = {
 
 let all_types = [%rapper
   get_many(
-    {sql| SELECT @string{id}, @Suit{payload}, @int{version},
+    {sql| SELECT @string{id}, @octets{payload}, @int{version},
                 @int32{some_int32}, @int64{some_int64}, @bool{added},
                 @float{fl}, @pdate{date}, @ptime{time}, @ptime_span{span}
          FROM some_table |sql},
     record_out,
   )
 ];
+
+/* Example of using [function_out] and [Rapper.load_many] */
+module Twoot = {
+  type t = {
+    id: int,
+    content: string,
+    likes: int,
+  };
+
+  let make = (~id, ~content, ~likes) => {id, content, likes};
+};
+
+module User = {
+  type t = {
+    id: int,
+    name: string,
+    twoots: list(Twoot.t),
+  };
+
+  let make = (~id, ~name) => {id, name, twoots: []};
+};
+
+let get_multiple_function_out = ((), dbh) =>
+  Async_kernel.Deferred.Result.(
+    [%rapper
+      get_many(
+        {sql|
+      SELECT @int{users.id}, @string{users.name},
+             @int{twoots.id}, @string{twoots.content}, @int{twoots.likes}
+      FROM users
+      JOIN twoots ON twoots.id = users.id
+      ORDER BY users.id
+      |sql},
+        function_out,
+      )
+    ](
+      (User.make, Twoot.make),
+      (),
+      dbh,
+    )
+    >>| Rapper.load_many(
+          (fst, ({User.id, _}) => id),
+          [(snd, (user, twoots) => {...user, twoots})],
+        )
+  );

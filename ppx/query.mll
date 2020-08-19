@@ -80,6 +80,10 @@ let build_param spec opt name =
       Ok (None, "ptime_span")
   | "float" ->
       Ok (None, "float")
+  | "cdate" ->
+      Ok (Some "Caqti_type_calendar", "cdate")
+  | "ctime" ->
+      Ok (Some "Caqti_type_calendar", "ctime")
   | module_name when String.length module_name > 0 && module_name.[0] >= 'A' && module_name.[0] <= 'Z' ->
       Ok (Some module_name, "t")
   | spec ->
@@ -96,8 +100,10 @@ let digit = ['0'-'9']
 let lower = ['a'-'z']
 let upper = ['A'-'Z']
 let underscore = '_'
+let dot = '.'
 let ident = (lower | underscore) (lower | upper | underscore | digit)*
-let spec = (lower | upper | underscore | digit)+
+let spec' = (lower | upper | underscore | digit)
+let spec = (spec' (dot spec')?)+
 
 rule main_parser buf acc_in acc_out list_status = parse
   | quot as delim

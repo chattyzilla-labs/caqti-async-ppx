@@ -2,18 +2,17 @@
 
 (name ppx_rapper)
 
-(version 1.0.2)
+(version 2.0.0)
 
 (source
- (github roddyyaga/ppx_rapper))
+ (github chattyzilla-labs/caqti-async-ppx))
 
-(documentation "https://github.com/roddyyaga/ppx_rapper")
+(documentation "https://github.com/chattyzilla-labs/caqti-async-ppx")
 
 (license MIT)
 
-(authors "Roddy MacSween <github@roddymacsween.co.uk>")
 
-(maintainers "Roddy MacSween <github@roddymacsween.co.uk>")
+(maintainers "Dakota Murphy <dakota@chattyzilla.com>")
 
 (generate_opam_files true)
 
@@ -23,9 +22,11 @@
  (depends
   (ocaml
    (>= 4.07))
-  dune
+  (dune
+   (>= 2.0.1))
   pg_query
   ppxlib
   base
   caqti
-  caqti-async))
+  caqti-async
+  (caqti-type-calendar :with-test)))

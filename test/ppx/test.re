@@ -166,7 +166,7 @@ let collect_list = [%rapper
   )
 ];
 
-module Suit: Ppx_rapper_runtime.CUSTOM = {
+module Suit: Rapper.CUSTOM = {
   type t =
     | Clubs
     | Diamonds
@@ -203,7 +203,65 @@ let all_types = [%rapper
   get_many(
     {sql| SELECT @string{id}, @octets{payload}, @int{version},
                 @int32{some_int32}, @int64{some_int64}, @bool{added},
-                @float{fl}, @pdate{date}, @ptime{time}, @ptime_span{span}
+                @float{fl}, @pdate{date}, @ptime{time}, @ptime_span{span},
+                @cdate{cd}, @ctime{ct}
          FROM some_table |sql},
+  )
+];
+
+module Nested = {
+  module Suit = Suit;
+};
+
+let get_cards = [%rapper
+  get_many(
+    {sql| SELECT @int{id}, @Nested.Suit{suit} FROM cards WHERE suit <> %Nested.Suit{suit} |sql},
+  )
+];
+
+type user = {
+  user_id: int,
+  name: string,
+};
+
+type twoot = {
+  twoot_id: int,
+  content: string,
+  likes: int,
+};
+
+let get_multiple_record_out = [%rapper
+  get_many(
+    {sql|
+      SELECT @int{users.user_id}, @string{users.name},
+             @int{twoots.twoot_id}, @string{twoots.content}, @int{twoots.likes}
+      FROM users
+      JOIN twoots ON twoots.user_id = users.user_id
+      ORDER BY users.user_id
+      |sql},
+    record_out,
+  )
+];
+
+let get_single_function_out = [%rapper
+  get_many(
+    {sql|
+      SELECT @int{id}, @string{name}
+      FROM users
+      |sql},
+    function_out,
+  )
+];
+
+let get_multiple_function_out = [%rapper
+  get_many(
+    {sql|
+      SELECT @int{users.id}, @string{users.name},
+             @int{twoots.id}, @string{twoots.content}, @int{twoots.likes}
+      FROM users
+      JOIN twoots ON twoots.id = users.id
+      ORDER BY users.id
+      |sql},
+    function_out,
   )
 ];

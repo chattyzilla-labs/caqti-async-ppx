@@ -42,13 +42,17 @@ type list_in = {versions: list(int)};
 
 let collect_list = [%rapper
   get_many(
-    {sql| SELECT @string{id} from schema_migrations where version in (%list{%int{versions}})|sql},
+    {sql|
+      SELECT @string{id}
+      FROM schema_migrations
+      WHERE version in (%list{%int{versions}})
+      |sql},
     record_in,
   )
 ];
 
 /* Using custom types */
-module Suit: Ppx_rapper_runtime.CUSTOM = {
+module Suit: Rapper.CUSTOM = {
   type t =
     | Clubs
     | Diamonds
@@ -93,14 +97,156 @@ type all_types_output = {
   date: Ptime.t,
   time: Ptime.t,
   span: Ptime.span,
+  cd: CalendarLib.Date.t,
+  ct: CalendarLib.Calendar.t,
 };
 
 let all_types = [%rapper
   get_many(
-    {sql| SELECT @string{id}, @octets{payload}, @int{version},
+    {sql|
+      SELECT @string{id}, @octets{payload}, @int{version},
                 @int32{some_int32}, @int64{some_int64}, @bool{added},
-                @float{fl}, @pdate{date}, @ptime{time}, @ptime_span{span}
-         FROM some_table |sql},
+                @float{fl}, @pdate{date}, @ptime{time}, @ptime_span{span},
+                @cdate{cd}, @ctime{ct}
+      FROM some_table
+      |sql},
     record_out,
   )
 ];
+
+let e = [%rapper
+  get_many(
+    {sql|
+      SELECT @int{id}
+      FROM users
+      WHERE id <> %int{id}
+        AND blah IN (%list{%Suit{blahs}})
+      |sql},
+  )
+];
+
+let f = [%rapper
+  get_many(
+    {sql|
+      SELECT @int{id}
+      FROM users
+      WHERE id <> %int{id}
+        AND %int{seriousness} = 5
+        AND blah IN (%list{%int{blahs}})
+        AND %string{x} = 'x'
+      |sql},
+  )
+];
+
+let h = [%rapper
+  get_many(
+    {sql|
+      SELECT @int{id}
+      FROM users
+      WHERE blah in (%list{%int{blahs}})
+      |sql},
+  )
+];
+
+let i = [%rapper
+  get_many(
+    {sql|
+      SELECT @int{id}
+      FROM users
+      WHERE blah in (%list{%int{blahs}})
+        AND %int{x} = x
+        AND %int{y} = y
+      |sql},
+  )
+];
+
+module Double_nested = {
+  module Nested = {
+    module Suit = Suit;
+  };
+};
+
+let nested_modules = [%rapper
+  get_many(
+    {sql|
+      SELECT @int{id}, @Double_nested.Nested.Suit{suit}
+      FROM cards
+      WHERE suit <> %Double_nested.Nested.Suit{suit}
+      AND username IN (%list{%Double_nested.Nested.Suit{suits}})
+      |sql},
+  )
+];
+
+type a' = {
+  a1: int,
+  a2: string,
+};
+
+type b' = {b1: bool};
+
+type c' = {c1: int};
+
+let get_multiple_record_out = [%rapper
+  get_many(
+    {sql|
+      SELECT @int{c.c1}, @int{a.a1}, @string{a.a2}, @bool{b.b1}
+      FROM some_table
+      |sql},
+    record_out,
+  )
+];
+
+let get_cards_function =
+  [%rapper
+    get_many(
+      {sql| SELECT @int{id}, @Suit{suit} FROM cards |sql},
+      function_out,
+    )
+  ](
+    (~suit, ~id) =>
+    (id, suit)
+  );
+
+module Twoot = {
+  type t = {
+    id: int,
+    content: string,
+    likes: int,
+  };
+
+  let make = (~id, ~content, ~likes) => {id, content, likes};
+};
+
+module User = {
+  type t = {
+    id: int,
+    name: string,
+    twoots: list(Twoot.t),
+  };
+
+  let make = (~id, ~name) => {id, name, twoots: []};
+};
+
+let get_multiple_function_out = ((), dbh) =>
+  Async_kernel.Deferred.Result.(
+    [%rapper
+      get_many(
+        {sql|
+      SELECT @int{users.id}, @string{users.name},
+             @int{twoots.id}, @string{twoots.content}, @int{twoots.likes}
+      FROM users
+      JOIN twoots ON twoots.id = users.id
+      ORDER BY users.id
+      |sql},
+        function_out,
+      )
+    ](
+      (User.make, Twoot.make),
+      (),
+      dbh,
+    )
+    >>| Rapper.load_many(
+          (fst, ({User.id, _}) => id),
+          [(snd, (user, twoots) => {...user, twoots})],
+        )
+  );

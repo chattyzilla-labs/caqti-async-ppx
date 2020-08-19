@@ -8,3 +8,4 @@ _release
 *.native
 *.install
 /node_modules
+.vscode/
